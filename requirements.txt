@@ -2,3 +2,5 @@ pyserial
 pyyaml
 numpy
 scipy
+pynmea2
+pyproj
