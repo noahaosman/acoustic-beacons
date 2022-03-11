@@ -6,6 +6,7 @@ import serial
 import time
 import yaml
 import numpy as np
+import pynmea2
 from datetime import datetime
 from classes.mlat_solver import Mlat
 
@@ -15,26 +16,27 @@ config = yaml.safe_load(open(config_file))
 
 # Get network settings
 settings = {
-    'sound_speed'    : float(config['settings']['sound_speed']),
-    'repeat_rate'    : float(config['settings']['repeat_rate']),
-    'range_rate'     : float(config['settings']['range_rate']),
-    'broadcast_rate' : float(config['settings']['broadcast_rate']),
-    'reply_timeout'  : float(config['settings']['reply_timeout']),
-    'randomize'      : float(config['settings']['randomize']),
+    'sound_speed': float(config['settings']['sound_speed']),
+    'repeat_rate': float(config['settings']['repeat_rate']),
+    'range_rate': float(config['settings']['range_rate']),
+    'broadcast_rate': float(config['settings']['broadcast_rate']),
+    'reply_timeout': float(config['settings']['reply_timeout']),
+    'randomize': float(config['settings']['randomize']),
 }
+
 
 class Modem:
     """A class for communications with Delphis Subsea Modems"""
 
-    #======================================================
+    # ======================================================
     # Process config file
-    #======================================================
+    # ======================================================
     def __init__(self, mode=None, args=None):
 
         # Open serial connection to modem
         self.ser = serial.Serial(
             port='/dev/ttyBeacon',
-            baudrate = 9600,
+            baudrate=9600,
             bytesize=serial.EIGHTBITS,
             parity=serial.PARITY_NONE,
             stopbits=serial.STOPBITS_ONE,
@@ -44,7 +46,7 @@ class Modem:
         # Verify modem status
         status_msg = self.status()
         self.address = status_msg['src']
-        print("Connected to modem %d, voltage: %.2fV" % (self.address,status_msg['voltage']))
+        print("Connected to modem %d, voltage: %.2fV" % (self.address, status_msg['voltage']))
 
         # Fall back to mode in config file if mode not set
         self.mode = mode or config['modems'][self.address]['mode']
@@ -57,7 +59,7 @@ class Modem:
             print("Opening GPS serial port")
             self.ser_gps = serial.Serial(
                 port=config['modems'][self.address]['serial_gps'],
-                baudrate = 9600,
+                baudrate=9600,
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
                 stopbits=serial.STOPBITS_ONE,
@@ -80,8 +82,8 @@ class Modem:
             # self.has_pressure = True
 
         # Define passive beacons
-        self.passive_beacons = [int(m) for m in config['modems'].keys() \
-                               if config['modems'][m]['mode']=='passive']
+        self.passive_beacons = [int(m) for m in config['modems'].keys()
+                                if config['modems'][m]['mode'] == 'passive']
 
         # Initialize multilateration solver
         self.mlat = Mlat(config)
@@ -92,16 +94,16 @@ class Modem:
             for m in self.passive_beacons:
                 x = config['modems'][m]['x']
                 y = config['modems'][m]['y']
-                lat,lon = self.mlat.local2gps(x,y)
+                lat, lon = self.mlat.local2gps(x, y)
                 config['modems'][m]['lat'] = lat
                 config['modems'][m]['lon'] = lon
 
         # Initialize dictionaries for passive beacon locations & distances
-        self.locs = {m:{'lat': config['modems'][m]['lat'],
-                        'lon': config['modems'][m]['lon'],
-                        'z':   config['modems'][m]['z']}
+        self.locs = {m: {'lat': config['modems'][m]['lat'],
+                         'lon': config['modems'][m]['lon'],
+                         'z':   config['modems'][m]['z']}
                      for m in self.passive_beacons}
-        self.dists = {m:None for m in self.passive_beacons}
+        self.dists = {m: None for m in self.passive_beacons}
 
         # Get initial position from config file
         self.lat = None
@@ -110,11 +112,11 @@ class Modem:
         if self.mode == "passive":
             self.lat = config['modems'][self.address]['lat']
             self.lon = config['modems'][self.address]['lon']
-            self.z   = config['modems'][self.address]['z']
+            self.z = config['modems'][self.address]['z']
 
-    #======================================================
+    # ======================================================
     # Low-level modem commands
-    #======================================================
+    # ======================================================
     def send(self, cmd=None, wait=False, n=1, prefix=None):
         "Send a command, optionally wait for the Nth response"
 
@@ -127,20 +129,21 @@ class Modem:
         # If wait==True, then:
         # - Send the command (if a command is given)
         # - Wait for the nth response with the desired prefix(es)
-        #   - If no prefix(es) is specified, wait for nth response with any prefix.
+        #   - If no prefix(es) is specified,
+        #     wait for nth response with any prefix.
         elif wait:
             t0 = time.time()
             c = 0
-            while c<n and time.time() - t0 < settings['reply_timeout']:
+            while c < n and time.time() - t0 < settings['reply_timeout']:
                 # Send command until at least 1 response is recieved,
                 # then keep listening until nth response.
-                if cmd and c==0:
+                if cmd and c == 0:
                     self.ser.write(cmd.encode())
 
                 # If we get a response with the right prefix, increment the counter
                 response = self.ser.readline().decode().strip()
                 if response and ((not prefix) or (response[1] in prefix)):
-                    c+=1
+                    c += 1
                 time.sleep(settings['repeat_rate'])
             return parse_message(response)
 
@@ -167,11 +170,11 @@ class Modem:
     def ping(self, target, wait=False):
         "Send range ping to target unit"
         cmd = "$P%03d" % (target)
-        return self.send(cmd=cmd,prefix=["P","R"],n=2,wait=wait)
+        return self.send(cmd=cmd, prefix=["P", "R"], n=2, wait=wait)
 
-    #======================================================
+    # ======================================================
     # Processing threads
-    #======================================================
+    # ======================================================
     # We should be fine to run any number of threads as long as:
     # - No two threads try to write to the same serial port at the same time
     # - No two threads try to read from the same serial port at the same time
@@ -186,7 +189,7 @@ class Modem:
         for target in itertools.cycle(self.passive_beacons):
             while time.time() - t0 <= settings['range_rate']:
                 time.sleep(0.005)
-            self.ping(target,wait=False)
+            self.ping(target, wait=False)
             t0 = time.time() + rand()
 
     def active_listen(self):
@@ -200,15 +203,15 @@ class Modem:
                 if msg['type'] == 'broadcast':
                     if is_hex(msg['str']):
                         # Decode the lat/lon message
-                        lat,lon = decode_ll(msg['str'])
+                        lat, lon = decode_ll(msg['str'])
                         # Update the location entry for the source beacon
                         self.locs[msg['src']]['lat'] = lat
                         self.locs[msg['src']]['lon'] = lon
-                        print("%d is at %.5fN,%.5fE" % (msg['src'],lat,lon),flush=True)
+                        print("%d is at %.5fN,%.5fE" % (msg['src'], lat, lon), flush=True)
                 elif msg['type'] == 'range':
                     # Update the distance entry for the source beacon
                     self.dists[msg['src']] = msg['range']
-                    print("%.2f m from %d" % (msg['range'], msg['src']),flush=True)
+                    print("%.2f m from %d" % (msg['range'], msg['src']), flush=True)
 
                 # Pass positions & distances to multilateration solver
                 if len(self.passive_beacons) > 2:
@@ -220,12 +223,13 @@ class Modem:
                         x0 = np.array((self.lat, self.lon, self.z))
 
                     # Estimate position
-                    [lat, lon, z] = self.mlat.solve(self.locs,self.dists,x0=x0)
+                    [lat, lon, z] = self.mlat.solve(self.locs, self.dists, x0=x0)
 
                     # TODO: overwrite z with pressure
                     # if self.has_pressure:
                     #     self.z = scale*self.pressure
-                    # TODO: Do something with this, like sending to the ROV brain
+                    # TODO: Do something with this,
+                    #    like sending to the ROV brain
 
     def passive_gps(self):
         "Parse all incoming GPS messages and update position"
@@ -246,7 +250,7 @@ class Modem:
             #
             msg_str = self.ser_gps.readline().decode().strip()
             if msg_str:
-                # print(msg_str,flush=True)
+                print(msg_str, flush=True)
                 # TODO: parse GPS messages and assign lat and lon
                 # self.lat = ...
                 # self.lon = ...
@@ -276,7 +280,7 @@ class Modem:
     def debug_timer(self):
         "Periodically broadcast the current time"
         period = float(self.args[0]) - settings['rate']
-        target = len(self.args)>1 and int(self.args[1]) or None
+        target = len(self.args) > 1 and int(self.args[1]) or None
         while self.ser.is_open:
             current_time = datetime.now().strftime("%H:%M:%S")
             if target:
@@ -285,9 +289,9 @@ class Modem:
                 self.broadcast(current_time)
             time.sleep(period)
 
-    #======================================================
+    # ======================================================
     # Main loop
-    #======================================================
+    # ======================================================
     def run(self, mode):
 
         # Set address and exit if in "set" mode
@@ -296,15 +300,15 @@ class Modem:
             self.set_address(address)
 
         # Define threads, but don't start any
-        ping_thread = Thread(target = self.active_ping)
-        listen_thread = Thread(target = self.active_listen)
-        gps_thread = Thread(target = self.passive_gps)
-        broadcast_thread = Thread(target = self.passive_broadcast)
-        pressure_thread = Thread(target = self.monitor_pressure)
+        ping_thread = Thread(target=self.active_ping)
+        listen_thread = Thread(target=self.active_listen)
+        gps_thread = Thread(target=self.passive_gps)
+        broadcast_thread = Thread(target=self.passive_broadcast)
+        pressure_thread = Thread(target=self.monitor_pressure)
 
         # Threads for debugging
-        report_thread = Thread(target = self.debug_report)
-        timer_thread = Thread(target = self.debug_timer)
+        report_thread = Thread(target=self.debug_report)
+        timer_thread = Thread(target=self.debug_timer)
 
         if mode == "active":
             ping_thread.start()
@@ -323,9 +327,10 @@ class Modem:
         elif mode == "report":
             report_thread.start()
 
-#=========================================================================
+# =========================================================================
 # Helper functions
-#=========================================================================
+# =========================================================================
+
 
 def parse_message(msg_str):
     "Parse a raw message string and return a useful structure"
@@ -333,14 +338,14 @@ def parse_message(msg_str):
         return None
 
     # Get message prefix and initialize output
-    prefix = msg_str[1];
+    prefix = msg_str[1]
     msg = {}
 
     # Status: #AxxxVyyyyy in response to "$?" (query status)
     #      or #Axxx       in response to "$Axxx" (set address)
     if prefix == "A":
         msg['type'] = "status"
-        msg['src'] = int(msg_str[2:5]) # xxx
+        msg['src'] = int(msg_str[2:5])  # xxx
         if len(msg_str) > 5:
             msg['voltage'] = float(msg_str[6:])*15/65536  # yyyyy...
         else:
@@ -351,7 +356,7 @@ def parse_message(msg_str):
     elif prefix == "B":
         if len(msg_str) > 4:
             msg['type'] = "broadcast"
-            msg['src'] = int(msg_str[2:5]) # xxx
+            msg['src'] = int(msg_str[2:5])  # xxx
             msg['str'] = msg_str[7:]  # ddd...
         else:
             msg['type'] = "broadcast_ack"
@@ -367,7 +372,7 @@ def parse_message(msg_str):
     elif prefix == "R":
         msg['type'] = "range"
         msg['src'] = int(msg_str[2:5])
-        msg['range'] = settings['sound_speed'] * 3.125e-5 * float(msg_str[6:11]);
+        msg['range'] = settings['sound_speed'] * 3.125e-5 * float(msg_str[6:11])
 
     # Note: Other message types are possible, but we don't currently use any of
     #       them. Return None if we encounter these.
@@ -376,6 +381,7 @@ def parse_message(msg_str):
 
     # Return message structure
     return msg
+
 
 def encode_decimal_deg(deg):
     "Encode decimal lat or lon to hexidecimal degrees, minutes, seconds"
@@ -386,23 +392,30 @@ def encode_decimal_deg(deg):
     neg = deg < 0
     deg = abs(deg)
     mins = (deg-np.floor(deg))*60
-    secs = (mins-np.floor(mins))*int('fff',16)
-    return "%02x%02x%03x%1x" % (int(np.floor(deg)), int(np.floor(mins)), int(np.floor(secs)), neg)
+    secs = (mins-np.floor(mins))*int('fff', 16)
+    return "%02x%02x%03x%1x" % (int(np.floor(deg)),
+                                int(np.floor(mins)),
+                                int(np.floor(secs)),
+                                neg)
+
 
 def decode_hex_dms(dms):
     "Decode hexidecimal degrees,mins,secs to decimal degrees"
-    degs = int(dms[0:2],16)
-    mins = int(dms[2:4],16)
-    secs = int(dms[4:7],16)*60/int('fff',16)
+    degs = int(dms[0:2], 16)
+    mins = int(dms[2:4], 16)
+    secs = int(dms[4:7], 16)*60/int('fff', 16)
     neg = bool(int(dms[7]))
     dec = degs + mins/60 + secs/60**2
     return neg and -1*dec or dec
 
-def encode_ll(lat,lon):
+
+def encode_ll(lat, lon):
     return encode_decimal_deg(lat) + encode_decimal_deg(lon)
+
 
 def decode_ll(hex_str):
     return decode_hex_dms(hex_str[0:8]), decode_hex_dms(hex_str[8:])
+
 
 def is_hex(s):
     try:
@@ -410,6 +423,7 @@ def is_hex(s):
         return True
     except ValueError:
         return False
+
 
 def rand():
     return settings['randomize'] * np.random.random()
