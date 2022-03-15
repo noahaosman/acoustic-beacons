@@ -8,6 +8,8 @@ import yaml
 import numpy as np
 import pynmea2
 import requests
+import socket
+from os import system
 from datetime import datetime
 from classes.mlat_solver import Mlat
 
@@ -24,6 +26,7 @@ settings = {
     'reply_timeout': float(config['settings']['reply_timeout']),
     'randomize': float(config['settings']['randomize']),
     'pressure_rate': float(config['settings']['pressure_rate']),
+    'gps_fwd_rate': float(config['settings']['gps_fwd_rate']),
 }
 
 
@@ -233,11 +236,14 @@ class Modem:
                     # Estimate position
                     [lat, lon, z] = self.mlat.solve(self.locs, self.dists, x0=x0)
 
-                    # TODO: overwrite z with pressure
-                    # if self.has_pressure:
-                    #     self.z = scale*self.pressure
-                    # TODO: Do something with this,
-                    #    like sending to the ROV brain
+                    self.lat = lat
+                    self.lon = lon
+
+                    # keep the output depth only if we don't have pressure data
+                    if not self.has_pressure:
+                        self.z = z
+                    if not self.z:
+                        self.z = z
 
     def monitor_gps(self):
         """Parse all incoming GPS messages and update position
@@ -318,6 +324,44 @@ class Modem:
             self.broadcast(msg)
             time.sleep(settings['broadcast_rate'] + rand())
 
+    def gps_forward(self):
+        """Periodically forward current position to PixHawk
+        UNTESTED
+        """
+        # NOTE: The only GGA fields parsed by the code that consumes
+        # these messages on the ROV (nmea-receiver.py) are:
+        # lat, lon, altitude, hdop, and satellites_visible.
+        # Satellites_visible has to be at least 6 for the Pixhawk to
+        # use the lat/lon data, so we hardcode it here as 6.
+        if config['modems'][self.address]['rov']:
+
+            # GPS data are expected on port 27000
+            sockit = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sockit.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sockit.setblocking(0)
+
+            fix_quality = '7'  # 7: manual input mode
+            sat_vis = '06'  # has to be at least 6 for Pixhawk to use it
+            hdop = '1.0'  # ideal (<1), excellent (1-2), good (2-5)
+
+            while True:
+                nowtime = datetime.utcnow().strftime('%H%M%S.00')
+                print(nowtime)
+                # convert lat/lon to NMEA format
+                [lat_nmea, lat_dir, lon_nmea, lon_dir] = ll_2_nmea(self.lat, self.lon)
+                # create a GGA NMEA sentence
+                msg_obj = pynmea2.GGA(
+                    'GP', 'GGA',
+                    (nowtime,
+                     lat_nmea, lat_dir,
+                     lon_nmea, lon_dir,
+                     fix_quality, sat_vis, hdop,
+                     str(-self.z), 'M', '', 'M', '', '0000'))
+                msg = str(msg_obj)
+                print(msg)
+                # sockit.sendto(msg.encode(), (‘0.0.0.0’, 27000))
+                time.sleep(settings['gps_fwd_rate'])
+
     def debug_report(self):
         "Parse all incoming modem messages"
         # Reads from acoustic modem serial port
@@ -355,6 +399,7 @@ class Modem:
         gps_thread = Thread(target=self.monitor_gps)
         broadcast_thread = Thread(target=self.passive_broadcast)
         pressure_thread = Thread(target=self.monitor_pressure)
+        output_thread = Thread(target=self.gps_forward)
 
         # Threads for debugging
         report_thread = Thread(target=self.debug_report)
@@ -364,6 +409,7 @@ class Modem:
             ping_thread.start()
             listen_thread.start()
             pressure_thread.start()
+            output_thread.start()
 
         elif mode == "passive":
             broadcast_thread.start()
@@ -485,6 +531,26 @@ def encode_ll(lat, lon):
 
 def decode_ll(hex_str):
     return decode_hex_dms(hex_str[0:8]), decode_hex_dms(hex_str[8:])
+
+
+def ll_2_nmea(lat_deg, lon_deg):
+    """ Converts decimal lat/lon degrees to NMEA format DDDMM.MMMMM.
+    """
+
+    lat_dir = 'N' if lat_deg >= 0 else 'S'
+    lon_dir = 'E' if lon_deg >= 0 else 'W'
+
+    lat_deg = abs(lat_deg)
+    lat_mins = (lat_deg-np.floor(lat_deg))*60
+    lat_nmea = "%02d%09.6f" % (int(np.floor(lat_deg)),
+                               lat_mins)
+
+    lon_deg = abs(lon_deg)
+    lon_mins = (lon_deg-np.floor(lon_deg))*60
+    lon_nmea = "%03d%09.6f" % (int(np.floor(lon_deg)),
+                               lon_mins)
+
+    return lat_nmea, lat_dir, lon_nmea, lon_dir
 
 
 def is_hex(s):

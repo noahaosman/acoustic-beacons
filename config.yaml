@@ -8,6 +8,7 @@ settings:
   reply_timeout: 1.0
   randomize: 0.1
   pressure_rate: 1.0
+  gps_fwd_rate: 1.0
 
 modems:
   101:
