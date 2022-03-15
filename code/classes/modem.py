@@ -15,7 +15,7 @@ from classes.mlat_solver import Mlat
 config_file = "/home/pi/nav/config.yaml"
 config = yaml.safe_load(open(config_file))
 
-# Get network settings
+# Get general settings
 settings = {
     'sound_speed': float(config['settings']['sound_speed']),
     'repeat_rate': float(config['settings']['repeat_rate']),
@@ -23,6 +23,7 @@ settings = {
     'broadcast_rate': float(config['settings']['broadcast_rate']),
     'reply_timeout': float(config['settings']['reply_timeout']),
     'randomize': float(config['settings']['randomize']),
+    'pressure_rate': float(config['settings']['pressure_rate']),
 }
 
 
@@ -263,19 +264,22 @@ class Modem:
                 # self.lon = ...
 
     def monitor_rov_pressure(self):
-        """ Request ROV pressure from PixHawk
+        """ Request ROV pressure (hPa) from PixHawk
         UNTESTED
         """
+        period = settings['pressure_rate']
         api_url = "http://192.168.2.2:4777/mavlink/SCALED_PRESSURE2/press_abs"
-        response = requests.get(api_url)
-        try:
-            output = response.json()
-            print(output)
-            self.pressure = output[‘press_abs’]
-            self.z = pressure_2_depth(self.pressure)
-            self.has_pressure = True
-        except Exception as e:
-            print('Unable to parse pressure from API.')
+        while True:
+            response = requests.get(api_url)
+            try:
+                output = response.json()
+                print(output)
+                self.pressure = output[‘press_abs’]
+                self.z = pressure_2_depth(self.pressure)
+                self.has_pressure = True
+            except Exception as e:
+                print('Unable to parse pressure from API.')
+            time.sleep(period)
 
     def monitor_ser_pressure(self):
         """ Collect pressure data from serial data feed
