@@ -14,7 +14,8 @@ from datetime import datetime
 from classes.mlat_solver import Mlat
 
 # Parse config file
-config_file = "/home/pi/nav/config.yaml"
+#config_file = "/home/pi/nav/config.yaml"
+config_file = "/Users/jasmine/main/jnash/code/acoustic-beacons/config.yaml"
 config = yaml.safe_load(open(config_file))
 
 # Get general settings
@@ -289,7 +290,7 @@ class Modem:
             try:
                 output = response.json()
                 print(output)
-                self.pressure = output[‘press_abs’]
+                self.pressure = output['press_abs']
                 self.z = pressure_2_depth(self.pressure)
                 self.has_pressure = True
             except Exception as e:
@@ -535,6 +536,7 @@ def decode_ll(hex_str):
 
 def ll_2_nmea(lat_deg, lon_deg):
     """ Converts decimal lat/lon degrees to NMEA format DDDMM.MMMMM.
+    UNTESTED
     """
 
     lat_dir = 'N' if lat_deg >= 0 else 'S'
