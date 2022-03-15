@@ -10,10 +10,13 @@ settings:
 modems:
   101:
     mode: active
+    rov: True
+    serial_beacon: /dev/ttyBeacon
   202:
     mode: passive
     x: 10
     y: -10
     z: 0
+    serial_beacon: /dev/ttyBeacon
     serial_gps: /dev/ttyAMA0
     serial_pressure: /dev/ttyPressure
