@@ -239,7 +239,7 @@ class Modem:
                     # TODO: Do something with this,
                     #    like sending to the ROV brain
 
-    def passive_gps(self):
+    def monitor_gps(self):
         "Parse all incoming GPS messages and update position"
         # Reads from GPS serial port
         while self.ser_gps.is_open:
@@ -252,7 +252,7 @@ class Modem:
             #         self.run()
             #       File "/usr/lib/python3.9/threading.py", line 892, in run
             #         self._target(*self._args, **self._kwargs)
-            #       File "/home/pi/nav/code/classes/modem.py", line 200, in passive_gps
+            #       File "/home/pi/nav/code/classes/modem.py", line 200, in monitor_gps
             #         msg_str = self.ser_gps.readline().decode().strip()
             #     UnicodeDecodeError: 'utf-8' codec can't decode byte 0xfc in position 0: invalid start byte
             #
@@ -343,7 +343,7 @@ class Modem:
         # Define threads, but don't start any
         ping_thread = Thread(target=self.active_ping)
         listen_thread = Thread(target=self.active_listen)
-        gps_thread = Thread(target=self.passive_gps)
+        gps_thread = Thread(target=self.monitor_gps)
         broadcast_thread = Thread(target=self.passive_broadcast)
         pressure_thread = Thread(target=self.monitor_pressure)
 
