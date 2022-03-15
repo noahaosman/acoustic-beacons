@@ -240,7 +240,9 @@ class Modem:
                     #    like sending to the ROV brain
 
     def monitor_gps(self):
-        "Parse all incoming GPS messages and update position"
+        """Parse all incoming GPS messages and update position
+        UNTESTED
+        """
         # Reads from GPS serial port
         while self.ser_gps.is_open:
 
@@ -256,12 +258,19 @@ class Modem:
             #         msg_str = self.ser_gps.readline().decode().strip()
             #     UnicodeDecodeError: 'utf-8' codec can't decode byte 0xfc in position 0: invalid start byte
             #
-            msg_str = self.ser_gps.readline().decode().strip()
+            # CHANGED: added arguments to the decode to hopefully circumvent the above error
+            msg_str = self.ser_gps.readline().decode('utf-8', 'ignore').strip()
             if msg_str:
                 print(msg_str, flush=True)
-                # TODO: parse GPS messages and assign lat and lon
-                # self.lat = ...
-                # self.lon = ...
+                if len(msg_str) > 5:
+                    if msg_str[0:6] == "$GPGGA":
+                        try:
+                            parsed = pynmea2.parse(msg_str)
+                            if parsed.latitude & parsed.longitude:
+                                self.lat = parsed.latitude
+                                self.lon = parsed.longitude
+                        except Exception as e:
+                            print('Unable to parse GPS GGA message.')
 
     def monitor_rov_pressure(self):
         """ Request ROV pressure (hPa) from PixHawk
