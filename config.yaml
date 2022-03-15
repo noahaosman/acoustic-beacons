@@ -23,3 +23,17 @@ modems:
     serial_beacon: /dev/ttyBeacon
     serial_gps: /dev/ttyAMA0
     serial_pressure: /dev/ttyPressure
+  203:
+    mode: passive
+    x: 10
+    y: -10
+    z: 0
+    serial_beacon: /dev/ttyBeacon
+    serial_gps: /dev/ttyAMA0
+  204:
+    mode: passive
+    x: 10
+    y: -10
+    z: 0
+    serial_beacon: /dev/ttyBeacon
+    serial_gps: /dev/ttyAMA0
