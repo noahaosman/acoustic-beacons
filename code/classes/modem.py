@@ -7,6 +7,7 @@ import time
 import yaml
 import numpy as np
 import pynmea2
+import requests
 from datetime import datetime
 from classes.mlat_solver import Mlat
 
@@ -33,9 +34,12 @@ class Modem:
     # ======================================================
     def __init__(self, mode=None, args=None):
 
+        # UNTESTED
+        self.port = '/dev/ttyBeacon' or config['modems'][self.address]['serial_beacon']
+
         # Open serial connection to modem
         self.ser = serial.Serial(
-            port='/dev/ttyBeacon',
+            port=self.port,
             baudrate=9600,
             bytesize=serial.EIGHTBITS,
             parity=serial.PARITY_NONE,
@@ -65,21 +69,24 @@ class Modem:
                 stopbits=serial.STOPBITS_ONE,
                 timeout=0.1
             )
-            self.has_gps = True
+            if self.ser_gps.is_open:
+                self.has_gps = True
 
-        # TODO: Open pressure serial port if configured
+        # Open pressure serial port if configured
+        # UNTESTED
         self.has_pressure = False
         if 'serial_pressure' in config['modems'][self.address]:
             print("Opening pressure serial port")
-            # self.ser_pressure = serial.Serial(
-            #     port=config['modems'][self.address]['serial_pressure'],
-            #     baudrate = 9600,
-            #     bytesize=serial.EIGHTBITS,
-            #     parity=serial.PARITY_NONE,
-            #     stopbits=serial.STOPBITS_ONE,
-            #     timeout=0.1
-            # )
-            # self.has_pressure = True
+            self.ser_pressure = serial.Serial(
+                port=config['modems'][self.address]['serial_pressure'],
+                baudrate=9600,
+                bytesize=serial.EIGHTBITS,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE,
+                timeout=0.1
+            )
+            if self.ser_pressure.is_open:
+                self.has_pressure = True
 
         # Define passive beacons
         self.passive_beacons = [int(m) for m in config['modems'].keys()
@@ -255,16 +262,46 @@ class Modem:
                 # self.lat = ...
                 # self.lon = ...
 
+    def monitor_rov_pressure(self):
+        """ Request ROV pressure from PixHawk
+        UNTESTED
+        """
+        api_url = "http://192.168.2.2:4777/mavlink/SCALED_PRESSURE2/press_abs"
+        response = requests.get(api_url)
+        try:
+            output = response.json()
+            print(output)
+            self.pressure = output[‘press_abs’]
+            self.z = pressure_2_depth(self.pressure)
+            self.has_pressure = True
+        except Exception as e:
+            print('Unable to parse pressure from API.')
+
+    def monitor_ser_pressure(self):
+        """ Collect pressure data from serial data feed
+        UNTESTED
+        """
+        while self.ser_pressure.is_open:
+            msg_str = self.ser_pressure.readline().decode().strip()
+            if msg_str:
+                print(msg_str, flush=True)
+                # TODO: parse pressure messages and assign pressure
+                # self.pressure = ...
+                # self.z = pressure_2_depth(self.pressure)
+
     def monitor_pressure(self):
-        "TODO: Parse all incoming pressure messages and update depth"
-        # while self.ser_pressure.is_open:
-            # Parse messages
-            # self.z = ...
+        """ Wrapper for the various pressure data sources."""
+        if config['modems'][self.address]['rov']:
+            self.monitor_rov_pressure(self)
+        elif self.ser_pressure.is_open:
+            self.monitor_ser_pressure(self)
+        else:
+            print('No pressure available.')
 
     def passive_broadcast(self):
         "Periodically broadcast current position"
         while self.ser.is_open:
-            msg = encode_decimal_deg(self.lat) + encode_decimal_deg(self.lon)
+            msg = encode_ll(self.lat, self.lon)
             self.broadcast(msg)
             time.sleep(settings['broadcast_rate'] + rand())
 
@@ -381,6 +418,26 @@ def parse_message(msg_str):
 
     # Return message structure
     return msg
+
+
+def pressure_2_depth(P_hPa):
+    """ Converts pressure (hPa) to depth (m)
+    using the hydrostatic water pressure formula.
+    UNTESTED
+    """
+
+    P = P_hPa * 100   # convert hPa to Pa
+
+    g = 9.80665  # m/s2, acceleration of gravity
+
+    medium = config['settings']['medium']
+    if medium == 'saltwater':
+        rho = 1023.6  # kg/m3, saltwater density
+    else:
+        rho = 997.0474  # kg/m3, freshwater density
+
+    z = P / (rho * g)  # depth in meters
+    return z
 
 
 def encode_decimal_deg(deg):
