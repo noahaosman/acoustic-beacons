@@ -39,7 +39,6 @@ class Modem:
     # ======================================================
     def __init__(self, mode=None, args=None):
 
-        # UNTESTED
         self.port = '/dev/ttyBeacon' or config['modems'][self.address]['serial_beacon']
 
         # Open serial connection to modem
@@ -74,8 +73,9 @@ class Modem:
                 stopbits=serial.STOPBITS_ONE,
                 timeout=0.1
             )
-            if self.ser_gps.is_open:
-                self.has_gps = True
+            if hasattr(self, 'ser_gps'):
+                if self.ser_gps.is_open:
+                    self.has_gps = True
 
         # Open pressure serial port if configured
         # UNTESTED
@@ -90,8 +90,9 @@ class Modem:
                 stopbits=serial.STOPBITS_ONE,
                 timeout=0.1
             )
-            if self.ser_pressure.is_open:
-                self.has_pressure = True
+            if hasattr(self, 'ser_pressure'):
+                if self.ser_pressure.is_open:
+                    self.has_pressure = True
 
         # Define passive beacons
         self.passive_beacons = [int(m) for m in config['modems'].keys()
@@ -248,24 +249,10 @@ class Modem:
 
     def monitor_gps(self):
         """Parse all incoming GPS messages and update position
-        UNTESTED
         """
         # Reads from GPS serial port
         while self.ser_gps.is_open:
 
-            # FIXME: This line sometimes fails with the following error, might
-            # need to change something here:
-            #
-            #     Traceback (most recent call last):
-            #       File "/usr/lib/python3.9/threading.py", line 954, in _bootstrap_inner
-            #         self.run()
-            #       File "/usr/lib/python3.9/threading.py", line 892, in run
-            #         self._target(*self._args, **self._kwargs)
-            #       File "/home/pi/nav/code/classes/modem.py", line 200, in monitor_gps
-            #         msg_str = self.ser_gps.readline().decode().strip()
-            #     UnicodeDecodeError: 'utf-8' codec can't decode byte 0xfc in position 0: invalid start byte
-            #
-            # CHANGED: added arguments to the decode to hopefully circumvent the above error
             msg_str = self.ser_gps.readline().decode('utf-8', 'ignore').strip()
             if msg_str:
                 print(msg_str, flush=True)
@@ -273,11 +260,12 @@ class Modem:
                     if msg_str[0:6] == "$GPGGA":
                         try:
                             parsed = pynmea2.parse(msg_str)
-                            if parsed.latitude & parsed.longitude:
+                            if parsed.latitude and parsed.longitude:
                                 self.lat = parsed.latitude
                                 self.lon = parsed.longitude
                         except Exception as e:
                             print('Unable to parse GPS GGA message.')
+                            print(e)
 
     def monitor_rov_pressure(self):
         """ Request ROV pressure (hPa) from PixHawk
@@ -311,10 +299,10 @@ class Modem:
 
     def monitor_pressure(self):
         """ Wrapper for the various pressure data sources."""
-        if config['modems'][self.address]['rov']:
-            self.monitor_rov_pressure(self)
-        elif self.ser_pressure.is_open:
-            self.monitor_ser_pressure(self)
+        if 'rov' in config['modems'][self.address]:
+            self.monitor_rov_pressure()
+        elif hasattr(self, ser_pressure):
+            self.monitor_ser_pressure()
         else:
             print('No pressure available.')
 
@@ -327,14 +315,13 @@ class Modem:
 
     def gps_forward(self):
         """Periodically forward current position to PixHawk
-        UNTESTED
         """
         # NOTE: The only GGA fields parsed by the code that consumes
         # these messages on the ROV (nmea-receiver.py) are:
         # lat, lon, altitude, hdop, and satellites_visible.
         # Satellites_visible has to be at least 6 for the Pixhawk to
         # use the lat/lon data, so we hardcode it here as 6.
-        if config['modems'][self.address]['rov']:
+        if 'rov' in config['modems'][self.address]:
 
             # GPS data are expected on port 27000
             sockit = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -357,9 +344,10 @@ class Modem:
                      lat_nmea, lat_dir,
                      lon_nmea, lon_dir,
                      fix_quality, sat_vis, hdop,
-                     str(-self.z), 'M', '', 'M', '', '0000'))
+                     str(-self.z), 'M', '', 'M', '', ''))
                 msg = str(msg_obj)
                 print(msg)
+                # NEXT LINE IS UNTESTED
                 # sockit.sendto(msg.encode(), (‘0.0.0.0’, 27000))
                 time.sleep(settings['gps_fwd_rate'])
 
@@ -536,7 +524,6 @@ def decode_ll(hex_str):
 
 def ll_2_nmea(lat_deg, lon_deg):
     """ Converts decimal lat/lon degrees to NMEA format DDDMM.MMMMM.
-    UNTESTED
     """
 
     lat_dir = 'N' if lat_deg >= 0 else 'S'
