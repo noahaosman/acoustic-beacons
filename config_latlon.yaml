@@ -1,0 +1,41 @@
+settings:
+  coords: latlon
+  medium: saltwater
+  sound_speed: 343
+  repeat_rate: 0.2
+  range_rate: 1.0
+  broadcast_rate: 10.0
+  reply_timeout: 1.0
+  randomize: 0.1
+  pressure_rate: 1.0
+  gps_fwd_rate: 1.0
+  lat0: 44.5
+  lon0: -123.3
+
+modems:
+  101:
+    mode: active
+    rov: True
+    serial_beacon: /dev/ttyBeacon
+  204:
+    mode: passive
+    x: 0
+    y: 0
+    lat: 44.56275
+    lon: -123.27878
+    z: -1
+    serial_beacon: /dev/ttyBeacon
+    serial_gps: /dev/ttyAMA0
+  205:
+    mode: passive
+    x: 10
+    y: 0
+    lat: 44.56275
+    lon: -123.27866
+    z: -1
+    serial_beacon: /dev/ttyBeacon
+    serial_gps: /dev/ttyAMA0
+  106:
+    mode: active
+    rov: True
+    serial_beacon: /dev/ttyBeacon
