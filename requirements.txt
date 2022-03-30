@@ -3,5 +3,5 @@ pyyaml
 numpy
 scipy
 pynmea2
-pyproj
+pyproj  # not required if the nonproj version of mlat_solver is used
 requests
