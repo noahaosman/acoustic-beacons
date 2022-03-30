@@ -11,11 +11,14 @@ import requests
 import socket
 from os import system
 from datetime import datetime
-from classes.mlat_solver import Mlat
+from classes.mlat_solver_noproj import Mlat
+import logging
+
+logging.basicConfig(filename='/home/pi/nav/beacons.log', encoding='utf-8', level=logging.DEBUG)
 
 # Parse config file
-#config_file = "/home/pi/nav/config.yaml"
-config_file = "/Users/jasmine/main/jnash/code/acoustic-beacons/config.yaml"
+config_file = "/home/pi/nav/config.yaml"
+#config_file = "/Users/jasmine/main/jnash/code/acoustic-beacons/config.yaml"
 config = yaml.safe_load(open(config_file))
 
 # Get general settings
@@ -54,17 +57,19 @@ class Modem:
         # Verify modem status
         status_msg = self.status()
         self.address = status_msg['src']
+        logging.info("Connected to modem %d, voltage: %.2fV" % (self.address, status_msg['voltage']))
         print("Connected to modem %d, voltage: %.2fV" % (self.address, status_msg['voltage']))
 
         # Fall back to mode in config file if mode not set
         self.mode = mode or config['modems'][self.address]['mode']
+        logging.info("Starting in %s mode" % self.mode)
         print("Starting in %s mode" % self.mode)
         self.args = args
 
         # Open GPS serial port if configured
         self.has_gps = False
         if 'serial_gps' in config['modems'][self.address]:
-            print("Opening GPS serial port")
+            logging.debug("Opening GPS serial port")
             self.ser_gps = serial.Serial(
                 port=config['modems'][self.address]['serial_gps'],
                 baudrate=9600,
@@ -81,7 +86,7 @@ class Modem:
         # UNTESTED
         self.has_pressure = False
         if 'serial_pressure' in config['modems'][self.address]:
-            print("Opening pressure serial port")
+            logging.debug("Opening pressure serial port")
             self.ser_pressure = serial.Serial(
                 port=config['modems'][self.address]['serial_pressure'],
                 baudrate=9600,
@@ -155,8 +160,12 @@ class Modem:
 
                 # If we get a response with the right prefix, increment the counter
                 response = self.ser.readline().decode().strip()
-                if response and ((not prefix) or (response[1] in prefix)):
-                    c += 1
+                if response:
+                    if (not prefix):
+                        c += 1
+                    elif len(response) > 2:
+                        if (response[1] in prefix):
+                            c += 1
                 time.sleep(settings['repeat_rate'])
             return parse_message(response)
 
@@ -173,6 +182,7 @@ class Modem:
     def broadcast(self, message, wait=False):
         "Send message to all units in range"
         cmd = "$B%02d%s" % (len(message), message)
+        logging.debug(cmd)
         return self.send(cmd=cmd, wait=wait)
 
     def unicast(self, message, target, wait=False):
@@ -220,14 +230,20 @@ class Modem:
                         # Update the location entry for the source beacon
                         self.locs[msg['src']]['lat'] = lat
                         self.locs[msg['src']]['lon'] = lon
-                        print("%d is at %.5fN,%.5fE" % (msg['src'], lat, lon), flush=True)
+                        logging.info("%d is at %.5fN,%.5fE" % (msg['src'], lat, lon))
                 elif msg['type'] == 'range':
                     # Update the distance entry for the source beacon
                     self.dists[msg['src']] = msg['range']
-                    print("%.2f m from %d" % (msg['range'], msg['src']), flush=True)
+                    logging.info("%.2f m from %d" % (msg['range'], msg['src']))
+
+                # check that we have distances from all Beacons
+                estimatePosition = True
+                for d, v in self.dists.items():
+                    if v is None:
+                        estimatePosition = False
 
                 # Pass positions & distances to multilateration solver
-                if len(self.passive_beacons) > 2:
+                if len(self.passive_beacons) > 1:
 
                     # Use previous position as initial guess if possible
                     if not (self.lat and self.lon and self.z):
@@ -236,16 +252,19 @@ class Modem:
                         x0 = np.array((self.lat, self.lon, self.z))
 
                     # Estimate position
-                    [lat, lon, z] = self.mlat.solve(self.locs, self.dists, x0=x0)
+                    if estimatePosition:
+                        [lat, lon, z] = self.mlat.solve(self.locs, self.dists, x0=x0)
 
-                    self.lat = lat
-                    self.lon = lon
+                        self.lat = lat
+                        self.lon = lon
 
-                    # keep the output depth only if we don't have pressure data
-                    if not self.has_pressure:
-                        self.z = z
-                    if not self.z:
-                        self.z = z
+                        # keep the output depth only if we don't have pressure data
+                        if not self.has_pressure:
+                            self.z = z
+                        if not self.z:
+                            self.z = z
+
+                        logging.info("Location of this active beacon: %.6f, %.6f, %.2f" % (self.lat, self.lon, self.z))
 
     def monitor_gps(self):
         """Parse all incoming GPS messages and update position
@@ -255,7 +274,7 @@ class Modem:
 
             msg_str = self.ser_gps.readline().decode('utf-8', 'ignore').strip()
             if msg_str:
-                print(msg_str, flush=True)
+                logging.debug(msg_str)
                 if len(msg_str) > 5:
                     if msg_str[0:6] == "$GPGGA":
                         try:
@@ -264,12 +283,11 @@ class Modem:
                                 self.lat = parsed.latitude
                                 self.lon = parsed.longitude
                         except Exception as e:
-                            print('Unable to parse GPS GGA message.')
-                            print(e)
+                            logging.error('Unable to parse GPS GGA message.')
+                            logging.error(e)
 
     def monitor_rov_pressure(self):
         """ Request ROV pressure (hPa) from PixHawk
-        UNTESTED
         """
         period = settings['pressure_rate']
         api_url = "http://192.168.2.2:4777/mavlink/SCALED_PRESSURE2/press_abs"
@@ -277,12 +295,13 @@ class Modem:
             response = requests.get(api_url)
             try:
                 output = response.json()
-                print(output)
-                self.pressure = output['press_abs']
+                self.pressure = output
                 self.z = pressure_2_depth(self.pressure)
+                logging.debug('Pressure: ' + str(self.pressure) + ' hPa')
+                logging.debug('Depth: ' + str(self.z) + ' m')
                 self.has_pressure = True
             except Exception as e:
-                print('Unable to parse pressure from API.')
+                logging.error('Unable to parse pressure from API.')
             time.sleep(period)
 
     def monitor_ser_pressure(self):
@@ -292,23 +311,26 @@ class Modem:
         while self.ser_pressure.is_open:
             msg_str = self.ser_pressure.readline().decode().strip()
             if msg_str:
-                print(msg_str, flush=True)
+                logging.debug(msg_str)
                 # TODO: parse pressure messages and assign pressure
                 # self.pressure = ...
                 # self.z = pressure_2_depth(self.pressure)
 
     def monitor_pressure(self):
         """ Wrapper for the various pressure data sources."""
-        if 'rov' in config['modems'][self.address]:
-            self.monitor_rov_pressure()
-        elif hasattr(self, ser_pressure):
+        if hasattr(self, 'ser_pressure'):
             self.monitor_ser_pressure()
+        elif 'rov' in config['modems'][self.address]:
+            if config['modems'][self.address]['rov']:
+                self.monitor_rov_pressure()
         else:
-            print('No pressure available.')
+            logging.warning('No pressure available.')
 
     def passive_broadcast(self):
-        "Periodically broadcast current position"
+        """Periodically broadcast current position
+        TO DO: Add depth to broadcast message."""
         while self.ser.is_open:
+            logging.debug("Passive beacon position is %.5f, %.5f" % (self.lat, self.lon))
             msg = encode_ll(self.lat, self.lon)
             self.broadcast(msg)
             time.sleep(settings['broadcast_rate'] + rand())
@@ -322,34 +344,36 @@ class Modem:
         # Satellites_visible has to be at least 6 for the Pixhawk to
         # use the lat/lon data, so we hardcode it here as 6.
         if 'rov' in config['modems'][self.address]:
+            if config['modems'][self.address]['rov']:
 
-            # GPS data are expected on port 27000
-            sockit = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sockit.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sockit.setblocking(0)
+                # GPS data are expected on port 27000
+                sockit = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sockit.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sockit.setblocking(0)
 
-            fix_quality = '7'  # 7: manual input mode
-            sat_vis = '06'  # has to be at least 6 for Pixhawk to use it
-            hdop = '1.0'  # ideal (<1), excellent (1-2), good (2-5)
+                fix_quality = '7'  # 7: manual input mode
+                sat_vis = '07'  # has to be greater than 6 for Pixhawk to use it
+                hdop = '1.0'  # ideal (<1), excellent (1-2), good (2-5)
 
-            while True:
-                nowtime = datetime.utcnow().strftime('%H%M%S.00')
-                print(nowtime)
-                # convert lat/lon to NMEA format
-                [lat_nmea, lat_dir, lon_nmea, lon_dir] = ll_2_nmea(self.lat, self.lon)
-                # create a GGA NMEA sentence
-                msg_obj = pynmea2.GGA(
-                    'GP', 'GGA',
-                    (nowtime,
-                     lat_nmea, lat_dir,
-                     lon_nmea, lon_dir,
-                     fix_quality, sat_vis, hdop,
-                     str(-self.z), 'M', '', 'M', '', ''))
-                msg = str(msg_obj)
-                print(msg)
-                # NEXT LINE IS UNTESTED
-                # sockit.sendto(msg.encode(), (‘0.0.0.0’, 27000))
-                time.sleep(settings['gps_fwd_rate'])
+                while True:
+                    if self.lat is not None and self.lon is not None:
+                        nowtime = datetime.utcnow().strftime('%H%M%S.00')
+                        # convert lat/lon to NMEA format
+                        [lat_nmea, lat_dir, lon_nmea, lon_dir] = ll_2_nmea(self.lat, self.lon)
+                        # create a GGA NMEA sentence
+                        msg_obj = pynmea2.GGA(
+                            'GP', 'GGA',
+                            (nowtime,
+                             lat_nmea, lat_dir,
+                             lon_nmea, lon_dir,
+                             fix_quality, sat_vis, hdop,
+                             str(-self.z), 'M', '', 'M', '', ''))
+                        msg = str(msg_obj)
+                        logging.debug(msg)
+                        # send gps position to ROV
+                        # sockit.sendto(msg.encode(), ('0.0.0.0', 27000))
+                        sockit.sendto(msg.encode(), ('192.168.2.2', 27000))
+                    time.sleep(settings['gps_fwd_rate'])
 
     def debug_report(self):
         "Parse all incoming modem messages"
@@ -358,7 +382,7 @@ class Modem:
             msg_str = self.ser.readline().decode().strip()
             msg = parse_message(msg_str)
             if msg:
-                print(msg)
+                logging.debug(msg)
 
     def debug_timer(self):
         "Periodically broadcast the current time"
@@ -421,6 +445,10 @@ def parse_message(msg_str):
     "Parse a raw message string and return a useful structure"
     if not msg_str:
         return None
+    elif len(msg_str) < 2:
+        return None
+    else:
+        logging.debug(':::' + msg_str + ':::')
 
     # Get message prefix and initialize output
     prefix = msg_str[1]
