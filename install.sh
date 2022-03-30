@@ -15,3 +15,5 @@ sudo udevadm trigger
 sudo systemctl daemon-reload
 sudo systemctl restart rsyslog
 sudo systemctl enable beacons
+
+sudo crontab pi.crontab
