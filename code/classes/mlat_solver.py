@@ -58,8 +58,9 @@ class Mlat:
         bounds = [(None, None), (None, None), (-100, 0)]
 
         # Estimate position by numerically minimizing the objective function
-        x = minimize(obj_fun, x0, args=(P, D), method='TNC',
-                     bounds=bounds, jac=1e-1, options={'ftol': 1e-4})
+        minout = minimize(obj_fun, x0, args=(P, D), method='TNC',
+                     bounds=bounds, options={'eps': 1e-1, 'ftol': 1e-4})
+        x = minout.x
 
         # Convert estimate to lat,lon
         lat, lon = self.local2gps(x[0], x[1])
