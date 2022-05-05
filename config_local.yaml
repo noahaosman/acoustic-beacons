@@ -1,20 +1,37 @@
 settings:
   coords: local
   medium: saltwater
-  sound_speed: 343
+  sound_speed: 1500
   repeat_rate: 0.2
   range_rate: 1.0
   broadcast_rate: 10.0
   reply_timeout: 1.0
-  randomize: 0.1
   pressure_rate: 1.0
   gps_fwd_rate: 1.0
 
 modems:
+  123:
+    mode: active
+    rov: False
+    serial_beacon: /dev/ttyBeacon
   101:
     mode: active
     rov: True
     serial_beacon: /dev/ttyBeacon
+  202:
+    mode: passive
+    x: 0
+    y: 10
+    z: 0
+    serial_beacon: /dev/ttyBeacon
+    serial_gps: /dev/ttyAMA0
+  203:
+    mode: passive
+    x: 0
+    y: 10
+    z: 0
+    serial_beacon: /dev/ttyBeacon
+    serial_gps: /dev/ttyAMA0
   204:
     mode: passive
     x: 0
@@ -24,8 +41,8 @@ modems:
     serial_gps: /dev/ttyAMA0
   205:
     mode: passive
-    x: 0
-    y: 10
+    x: 10
+    y: 0
     z: 0
     serial_beacon: /dev/ttyBeacon
     serial_gps: /dev/ttyAMA0
