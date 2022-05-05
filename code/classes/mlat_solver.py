@@ -46,7 +46,7 @@ class Mlat:
              for m in locs.keys()])
 
         # Convert distances to a matrix
-        D = np.array([dists[m] for m in dists.keys()])
+        D = np.array([dists[m]['range'] for m in dists.keys()])
 
         # Initial guess: average of passive beacon locations if none given.
         if not x0:
@@ -59,7 +59,7 @@ class Mlat:
 
         # Estimate position by numerically minimizing the objective function
         minout = minimize(obj_fun, x0, args=(P, D), method='TNC',
-                     bounds=bounds, options={'eps': 1e-1, 'ftol': 1e-4})
+                          bounds=bounds, options={'eps': 1e-1, 'ftol': 1e-4})
         x = minout.x
 
         # Convert estimate to lat,lon
