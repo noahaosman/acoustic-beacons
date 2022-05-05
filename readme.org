@@ -29,6 +29,43 @@ Depending on the specified mode, the node will perform a different task:
 
 - Report mode (~./beacons.py report~) prints all incoming messages.
 
+** Configuration
+
+- Configuration settings are stored in config.yaml
+
+Example:
+
+________________________________________
+
+settings:
+  coords: latlon                 # latlon or local - type of coordinates to use
+  medium: saltwater              # air, saltwater or freshwater - used to calculate depth from pressure and distance from sound speed
+  repeat_rate: 0.2               # seconds
+  range_rate: 1.0                # seconds
+  broadcast_rate: 10.0           # seconds
+  reply_timeout: 1.0             # seconds
+  pressure_rate: 1.0             # seconds
+  gps_fwd_rate: 1.0              # seconds
+  lat0: 44.5
+  lon0: -123.3
+
+modems:
+  101:
+    mode: active                 # active or off
+    rov: True                    # True or False
+    serial_beacon: /dev/ttyBeacon
+  202:
+    mode: passive                # passive or off
+    x: 0                         # meters from origin
+    y: 10                        # meters from origin
+    lat: 44.56283
+    lon: -123.27878
+    z: -1                        # depth (meters)
+    serial_beacon: /dev/ttyBeacon
+    serial_gps: /dev/ttyAMA0
+    vessel: True                 # True or False
+    static: True                 # True or False
+________________________________________
 
 ** Deploying
 
