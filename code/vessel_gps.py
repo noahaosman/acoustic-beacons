@@ -1,5 +1,5 @@
-# Forwards serial vessel GPS data to the 
-# ROV companion computer (192.168.2.2) at UDP port 27099.
+# Forwards serial vessel GPS data to the
+# ROV companion computer (192.168.2.2) at UDP port 14401.
 #
 # Usage:
 #   python vessel_gps.py
