@@ -16,4 +16,4 @@ sudo systemctl daemon-reload
 sudo systemctl restart rsyslog
 sudo systemctl enable beacons
 
-sudo crontab pi.crontab
+sudo crontab pi.cron
