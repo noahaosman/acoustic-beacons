@@ -6,3 +6,5 @@ config_latlon.yaml
 install.sh
 requirements.txt
 pi.cron
+receive_command.py
+send_command.py

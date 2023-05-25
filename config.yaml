@@ -3,7 +3,7 @@ settings:
   medium: saltwater
   atm_pressure_hpa: 1013.25
   repeat_rate: 0.2
-  range_rate: 1.0
+  range_rate: 5.0
   reply_timeout: 1.0
   pressure_rate: 1.0
   gps_fwd_rate: 1.0
@@ -11,29 +11,20 @@ settings:
   max_gps_lag: 300.0
   lat0: 44.5
   lon0: -123.3
+  input_port: 4000
+  output_port: 3000
+  serial_beacon: /dev/ttyBeacon
 
 modems:
   123:
     mode: active
     rov: False
-    serial_beacon: /dev/ttyBeacon
+    recvd_data_path: /home/pi/nav/data
   101:
     mode: active
     rov: False
-    serial_beacon: /dev/ttyBeacon
+    recvd_data_path: /home/pi/nav/data
   202:
-    mode: passive
-    vessel: True
-    x: 0.0
-    y: 10.0
-    lat: 44.56283
-    lon: -123.27878
-    z: -1.0
-    broadcast_times: []
-    serial_beacon: /dev/ttyBeacon
-    serial_gps: /dev/ttyAMA0
-    static: False
-  203:
     mode: passive
     vessel: False
     x: 0.0
@@ -42,11 +33,25 @@ modems:
     lon: -123.27878
     z: -1.0
     broadcast_times: []
-    serial_beacon: /dev/ttyBeacon
+    static: False
+    data_rates: [60, 60]
+    data_files: ['/home/pi/data/revs.txt', '/home/pi/data/voltage.txt',]
+    data_target: 106
+    recvd_data_path: /home/pi/nav/data
+  203:
+    mode: off
+    vessel: False
+    x: 0.0
+    y: 10.0
+    lat: 44.56283
+    lon: -123.27878
+    z: -1.0
+    broadcast_times: []
     serial_gps: /dev/ttyAMA0
     static: False
+    recvd_data_path: /home/pi/nav/data
   204:
-    mode: passive
+    mode: off
     vessel: True
     x: 5.0
     y: -2.0
@@ -54,11 +59,11 @@ modems:
     lon: -123.27878
     z: -1.0
     broadcast_times: []
-    serial_beacon: /dev/ttyBeacon
     serial_gps: /dev/ttyAMA0
     static: False
+    recvd_data_path: /home/pi/nav/data
   205:
-    mode: passive
+    mode: off
     vessel: True
     x: -5.0
     y: -2.0
@@ -66,10 +71,40 @@ modems:
     lon: -123.27866
     z: -1.0
     broadcast_times: []
-    serial_beacon: /dev/ttyBeacon
     serial_gps: /dev/ttyAMA0
     static: False
+    recvd_data_path: /home/pi/nav/data
   106:
     mode: active
     rov: True
-    serial_beacon: /dev/ttyBeacon
+    recvd_data_path: /home/pi/nav/data
+  107:
+    mode: active
+    rov: True
+    recvd_data_path: /home/pi/nav/data
+  208:
+    mode: off
+    vessel: False
+    x: -5.0
+    y: -2.0
+    lat: 44.56275
+    lon: -123.27866
+    z: -1.0
+    broadcast_times: []
+    serial_gps: /dev/ttyAMA0
+    static: False
+    recvd_data_path: /home/pi/nav/data
+  209:
+    mode: passive
+    vessel: False
+    x: 0.0
+    y: 10.0
+    lat: 44.56283
+    lon: -123.27878
+    z: -1.0
+    broadcast_times: []
+    static: False
+    data_rates: [60, 60]
+    data_files: ['/home/pi/data/revs.txt', '/home/pi/data/voltage.txt',]
+    data_target: 106
+    recvd_data_path: /home/pi/nav/data

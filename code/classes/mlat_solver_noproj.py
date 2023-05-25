@@ -4,9 +4,14 @@ import numpy as np
 from scipy.optimize import minimize
 import logging
 
+# use these lines for older than python 3.9
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.DEBUG)
+handler = logging.FileHandler('/home/pi/nav/mlat.log', 'w', 'utf-8')
+root_logger.addHandler(handler)
 
-logging.basicConfig(filename='/home/pi/nav/mlat.log', encoding='utf-8', level=logging.DEBUG)
-
+# the line below requires python 3.9 or above
+# logging.basicConfig(filename='/home/pi/nav/mlat.log', encoding='utf-8', level=logging.DEBUG)
 
 class Mlat:
     "True-range multilateration solver"

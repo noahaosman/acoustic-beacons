@@ -10,7 +10,7 @@ import pynmea2
 import requests
 import socket
 from os import system
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 from classes.mlat_solver_noproj import Mlat
 
@@ -33,6 +33,9 @@ def setup_logger(name, log_file, level=logging.INFO):
 # file loggers
 log_full = setup_logger('log_full', '/home/pi/nav/beacons_full.log', level=logging.DEBUG)
 log_short = setup_logger('log_short', '/home/pi/nav/beacons_short.log', level=logging.DEBUG)
+log_broadcast = setup_logger('log_broadcast', '/home/pi/nav/data/broadcast.txt', level=logging.INFO)
+log_unicast = setup_logger('log_unicast', '/home/pi/nav/data/unicast.txt', level=logging.INFO)
+log_range = setup_logger('log_range', '/home/pi/nav/data/range.txt', level=logging.INFO)
 
 # Parse config file
 config_file = "/home/pi/nav/config.yaml"
@@ -51,6 +54,9 @@ settings = {
     'gps_fwd_rate': float(config['settings']['gps_fwd_rate']),
     'max_range_lag': float(config['settings']['max_range_lag']),
     'max_gps_lag': float(config['settings']['max_gps_lag']),
+    'output_port': float(config['settings']['output_port']),
+    'input_port': float(config['settings']['input_port']),
+    'serial_beacon': config['settings']['serial_beacon'],
 }
 
 
@@ -64,7 +70,10 @@ class Modem:
 
         # self.lock = Lock()
 
-        self.port = '/dev/ttyBeacon' or config['modems'][self.address]['serial_beacon']
+        self.port = settings['serial_beacon']
+
+        # sleep for 6 seconds to give the beacon time to load
+        time.sleep(6)
 
         # Open serial connection to modem
         self.ser = serial.Serial(
@@ -191,6 +200,29 @@ class Modem:
                 self.all_broadcast_times.extend(next_second)
         log_full.debug(self.all_broadcast_times)
 
+        # Get data transfer information from config file
+        self.has_data = False
+        self.data_files = None
+        self.data_rates = None
+        self.data_method = None
+        self.data_target = None
+        if 'data_files' in config['modems'][self.address]:
+            if 'data_rates' in config['modems'][self.address]:
+                self.has_data = True
+                self.data_files = config['modems'][self.address]['data_files']
+                self.data_rates = config['modems'][self.address]['data_rates']
+                # unicast data need a target
+                if 'data_target' in config['modems'][self.address]:
+                    self.data_target = config['modems'][self.address]['data_target']
+                    self.data_method = 'unicast'
+                else:
+                    self.data_method = 'broadcast'
+
+        # Get location to store incoming beacon data
+        self.recvd_data_path = None
+        if 'recvd_data_path' in config['modems'][self.address]:
+            self.recvd_data_path = config['modems'][self.address]['recvd_data_path']
+
         # the speed of sound (in m/s) depends on the medium
         # Note: speed of sound increases with increasing
         #       temperature, salinity, and pressure
@@ -208,6 +240,13 @@ class Modem:
         # initial conditions for system time set from GPS
         self.gps_start_time = None
         self.timeset = False
+
+        self.input_port = None
+        self.output_port = None
+        if 'input_port' in config['settings']:
+            self.input_port = config['settings']['input_port']
+        if 'output_port' in config['settings']:
+            self.output_port = config['settings']['output_port']
 
     # ======================================================
     # Low-level modem commands
@@ -268,6 +307,7 @@ class Modem:
     def unicast(self, message, target, wait=False):
         "Send message to target unit (specified by 3-digit integer)"
         cmd = "$U%03d%02d%s" % (target, len(message), message)
+        log_full.debug(cmd)
         return self.send(cmd=cmd, wait=wait)
 
     def ping(self, target, wait=False):
@@ -288,124 +328,179 @@ class Modem:
     def active_ping(self):
         "Cyclically loop over passive beacons and send ranging pings"
         # Writes to acoustic modem serial port
+        log_full.debug('Starting active ping thread.')
         sleep_to_full_second()
         t0 = time.time() - settings['range_rate']
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         for target in itertools.cycle(self.passive_beacons):
             while (time.time() - t0 <= settings['range_rate']) or (now.second in self.all_broadcast_times):
                 time.sleep(0.05)
-                now = datetime.now()
+                now = datetime.now(timezone.utc)
             self.ping(target, wait=False)
+            log_full.debug('Sent active ping.')
             self.dists[target]['pings_sent'] = self.dists[target]['pings_sent'] + 1
             t0 = time.time()
 
     def active_listen(self):
         "Parse ranging returns and broadcasts, update positions & distances"
+        log_full.debug('Starting active listen thread.')
+        try:
+            while self.ser.is_open:
+                # with self.lock:
+                msg_str = self.ser.readline().decode().strip()
+                log_full.debug(msg_str)
+                msg = parse_message(msg_str)
+
+                # Update position or distance from passive beacon
+                if msg:
+                    try:
+                        run_update = False
+                        msgtime = msg['time'].strftime("%Y-%m-%d %H:%M:%S.%f %Z")
+                        if msg['type'] == 'broadcast':
+                            log_full.debug('Got broadcast message.')
+                            if is_hex(msg['str']):
+                                # Decode the lat/lon message
+                                lat, lon, z = decode_ll(msg['str'])
+                                # Update the location entry for the source beacon
+                                self.locs[msg['src']]['time'] = msg['time']
+                                self.locs[msg['src']]['lat'] = lat
+                                self.locs[msg['src']]['lon'] = lon
+                                self.locs[msg['src']]['z'] = z
+                                data = "%.5fN,%.5fE,%.1fm" % (lat, lon, z)
+                                log_full.info("Message time %s" % (msg['time'],))
+                                log_full.info("%d is at: %s" % (msg['src'], data))
+                                run_update = True
+                            else:
+                                data = msg['str']
+                                log_full.info("Message time %s" % (msg['time'],))
+                                log_full.info("%d sent data message: %s" % (msg['src'], data))
+                            line = str(msg['src']) + ' --- ' + str(data)
+                            log_broadcast.info(line)
+                        elif msg['type'] == 'unicast':
+                            log_full.debug('Got unicast message.')
+                            log_full.info(msg)
+                            data = msg['str']
+                            log_full.info("Message time %s" % (msg['time'],))
+                            log_full.info("Unicast message received: %s" % (data,))
+                            line = str(data)
+                            log_unicast.info(line)
+                            send_socket(self.output_port, data)
+                        elif msg['type'] == 'range':
+                            log_full.debug('Got range message.')
+                            # Update the distance entry for the source beacon
+                            self.dists[msg['src']]['time'] = msg['time']
+                            self.dists[msg['src']]['range'] = msg['range']
+                            self.dists[msg['src']]['pings_rcvd'] = self.dists[msg['src']]['pings_rcvd'] + 1
+                            log_full.info("Message time %s" % (msg['time'],))
+                            log_full.info("%.2f m from %d" % (msg['range'], msg['src']))
+                            line = str(msg['src']) + ' -- ' + str(msg['range'])
+                            log_range.info(line)
+                            run_update = True
+
+                        if run_update:
+                            # check which beacons have recent distances
+                            now = datetime.now(timezone.utc)
+                            max_range_lag = settings['max_range_lag']
+                            max_gps_lag = settings['max_gps_lag']
+                            for m in self.dists.keys():
+                                self.dists[m]['recent'] = False
+                                if self.dists[m]['time'] is not None:
+                                    if (now - self.dists[m]['time']).total_seconds() < max_range_lag:
+                                        self.dists[m]['recent'] = True
+                            for m in self.locs.keys():
+                                self.locs[m]['recent'] = False
+                                if 'static' in config['modems'][m]:
+                                    if config['modems'][m]['static']:
+                                        self.locs[m]['recent'] = True
+                                    else:
+                                        if self.locs[m]['time'] is not None:
+                                            if (now - self.locs[m]['time']).total_seconds() < max_gps_lag:
+                                                self.locs[m]['recent'] = True
+                                else:
+                                    if self.locs[m]['time'] is not None:
+                                        if (now - self.locs[m]['time']).total_seconds() < max_gps_lag:
+                                            self.locs[m]['recent'] = True
+                            self.recent_beacons = []
+                            for m in self.passive_beacons:
+                                if self.dists[m]['recent'] and self.locs[m]['recent']:
+                                    self.recent_beacons.append(m)
+                            log_full.debug('Recent beacons: ')
+                            log_full.debug(self.recent_beacons)
+
+                            # Pass positions & distances to multilateration solver
+                            if len(self.recent_beacons) > 1:
+
+                                # Use previous position as initial guess if possible
+                                if not (self.lat and self.lon and self.z):
+                                    x0 = None
+                                else:
+                                    x0 = np.array((self.lat, self.lon, self.z))
+
+                                recent_locs = dict()
+                                recent_dists = dict()
+                                for m in self.recent_beacons:
+                                    recent_locs[m] = self.locs[m]
+                                    recent_dists[m] = self.dists[m]
+
+                                log_full.debug('Starting solve ...')
+                                [lat, lon, z] = self.mlat.solve(recent_locs, recent_dists, x0=x0)
+                                log_full.debug('Finished solve.')
+
+                                self.lat = lat
+                                self.lon = lon
+
+                                # keep the output depth only if we don't have pressure data
+                                if not self.has_pressure:
+                                    self.z = z
+                                if not self.z:
+                                    self.z = z
+
+                                log_full.info("Location of this active beacon: %.6f, %.6f, %.2f" % (self.lat, self.lon, self.z))
+                                log_short.info('This beacon: Calculated location: %.6f, %.6f, %.2f' % (self.lat, self.lon, self.z))
+
+                            else:
+                                log_full.info("Location of this active beacon not calculated.")
+                                log_short.info('This beacon: Calculated location: Not calculated.')
+
+                            # write status to short log
+                            for m in self.passive_beacons:
+                                log_short.info('Beacon %d: Recent range   : %s' % (m, self.dists[m]['recent']))
+                                log_short.info('Beacon %d: Recent locat   : %s' % (m, self.locs[m]['recent']))
+                                log_short.info('Beacon %d: Last range time: %s' % (m, self.dists[m]['time']))
+                                log_short.info('Beacon %d: Last locat time: %s' % (m, self.locs[m]['time']))
+                                log_short.info('Beacon %d: Pings rcvd/sent: %d/%d' % (m, self.dists[m]['pings_rcvd'], self.dists[m]['pings_sent']))
+                                log_short.info('Beacon %d: Last range     : %s' % (m, str(self.dists[m]['range'])))
+                                log_short.info('Beacon %d: Last locat     : %s, %s, %s m' % (m, str(self.locs[m]['lat']), str(self.locs[m]['lon']), str(self.locs[m]['z'])))
+
+                            log_full.handlers[0].flush()
+                            log_short.handlers[0].flush()
+
+                    except Exception as e:
+                        log_full.debug(e)
+                        log_full.debug('active_listen error')
+
+            log_full.info('Beacon serial port closed.')
+
+        except Exception as e:
+            logging.debug(e)
+
+        log_full.info('Active listening ended.')
+
+    def passive_listen(self):
+        "Parse and forward any broadcasts/unicasts received"
         while self.ser.is_open:
             # with self.lock:
             msg_str = self.ser.readline().decode().strip()
             log_full.debug(msg_str)
             msg = parse_message(msg_str)
 
-            # Update position or distance from passive beacon
+            # Forward any commands received to a socket
             if msg:
-                if msg['type'] == 'broadcast':
-                    log_full.debug('Got broadcast message.')
-                    if is_hex(msg['str']):
-                        # Decode the lat/lon message
-                        lat, lon, z = decode_ll(msg['str'])
-                        # Update the location entry for the source beacon
-                        self.locs[msg['src']]['time'] = msg['time']
-                        self.locs[msg['src']]['lat'] = lat
-                        self.locs[msg['src']]['lon'] = lon
-                        self.locs[msg['src']]['z'] = z
-                        log_full.info("Message time %s" % (msg['time'],))
-                        log_full.info("%d is at %.5fN,%.5fE,%.1fm" % (msg['src'], lat, lon, z))
-                elif msg['type'] == 'range':
-                    log_full.debug('Got range message.')
-                    # Update the distance entry for the source beacon
-                    self.dists[msg['src']]['time'] = msg['time']
-                    self.dists[msg['src']]['range'] = msg['range']
-                    self.dists[msg['src']]['pings_rcvd'] = self.dists[msg['src']]['pings_rcvd'] + 1
-                    log_full.info("Message time %s" % (msg['time'],))
-                    log_full.info("%.2f m from %d" % (msg['range'], msg['src']))
-
-                # check which beacons have recent distances
-                now = datetime.now()
-                max_range_lag = settings['max_range_lag']
-                max_gps_lag = settings['max_gps_lag']
-                for m in self.dists.keys():
-                    self.dists[m]['recent'] = False
-                    if self.dists[m]['time'] is not None:
-                        if (now - self.dists[m]['time']).total_seconds() < max_range_lag:
-                            self.dists[m]['recent'] = True
-                for m in self.locs.keys():
-                    self.locs[m]['recent'] = False
-                    if 'static' in config['modems'][m]:
-                        if config['modems'][m]['static']:
-                            self.locs[m]['recent'] = True
-                        else:
-                            if self.locs[m]['time'] is not None:
-                                if (now - self.locs[m]['time']).total_seconds() < max_gps_lag:
-                                    self.locs[m]['recent'] = True
-                    else:
-                        if self.locs[m]['time'] is not None:
-                            if (now - self.locs[m]['time']).total_seconds() < max_gps_lag:
-                                self.locs[m]['recent'] = True
-                self.recent_beacons = []
-                for m in self.passive_beacons:
-                    if self.dists[m]['recent'] and self.locs[m]['recent']:
-                        self.recent_beacons.append(m)
-                log_full.debug('Recent beacons: ')
-                log_full.debug(self.recent_beacons)
-
-                # Pass positions & distances to multilateration solver
-                if len(self.recent_beacons) > 1:
-
-                    # Use previous position as initial guess if possible
-                    if not (self.lat and self.lon and self.z):
-                        x0 = None
-                    else:
-                        x0 = np.array((self.lat, self.lon, self.z))
-
-                    recent_locs = dict()
-                    recent_dists = dict()
-                    for m in self.recent_beacons:
-                        recent_locs[m] = self.locs[m]
-                        recent_dists[m] = self.dists[m]
-
-                    log_full.debug('Starting solve ...')
-                    [lat, lon, z] = self.mlat.solve(recent_locs, recent_dists, x0=x0)
-                    log_full.debug('Finished solve.')
-
-                    self.lat = lat
-                    self.lon = lon
-
-                    # keep the output depth only if we don't have pressure data
-                    if not self.has_pressure:
-                        self.z = z
-                    if not self.z:
-                        self.z = z
-
-                    log_full.info("Location of this active beacon: %.6f, %.6f, %.2f" % (self.lat, self.lon, self.z))
-                    log_short.info('This beacon: Calculated location: %.6f, %.6f, %.2f' % (self.lat, self.lon, self.z))
-
-                else:
-                    log_full.info("Location of this active beacon not calculated.")
-                    log_short.info('This beacon: Calculated location: Not calculated.')
-
-                # write status to short log
-                for m in self.passive_beacons:
-                    log_short.info('Beacon %d: Recent range   : %s' % (m, self.dists[m]['recent']))
-                    log_short.info('Beacon %d: Recent locat   : %s' % (m, self.locs[m]['recent']))
-                    log_short.info('Beacon %d: Last range time: %s' % (m, self.dists[m]['time']))
-                    log_short.info('Beacon %d: Last locat time: %s' % (m, self.locs[m]['time']))
-                    log_short.info('Beacon %d: Pings rcvd/sent: %d/%d' % (m, self.dists[m]['pings_rcvd'], self.dists[m]['pings_sent']))
-                    log_short.info('Beacon %d: Last range     : %s' % (m, str(self.dists[m]['range'])))
-                    log_short.info('Beacon %d: Last locat     : %s, %s, %s m' % (m, str(self.locs[m]['lat']), str(self.locs[m]['lon']), str(self.locs[m]['z'])))
-
-                log_full.handlers[0].flush()
-                log_short.handlers[0].flush()
+                data = msg['str']
+                log_full.debug("Received broadcast/unicast message.")
+                log_full.info("Message time %s" % (msg['time'],))
+                log_full.info("Received message: %s" % (data,))
+                send_socket(self.output_port, data)
 
     def monitor_gps(self):
         """Parse all incoming GPS messages and update position
@@ -470,7 +565,7 @@ class Modem:
                                 if parsed.latitude and parsed.longitude:
                                     self.surface_vessel['lat'] = parsed.latitude
                                     self.surface_vessel['lon'] = parsed.longitude
-                                    self.surface_vessel['time'] = datetime.now()
+                                    self.surface_vessel['time'] = datetime.now(timezone.utc)
                                 else:
                                     self.surface_vessel['lat'] = None
                                     self.surface_vessel['lon'] = None
@@ -485,7 +580,7 @@ class Modem:
                                 parsed = pynmea2.parse(msg_str)
                                 if parsed.heading:
                                     self.surface_vessel['heading'] = parsed.heading
-                                    self.surface_vessel['heading_time'] = datetime.now()
+                                    self.surface_vessel['heading_time'] = datetime.now(timezone.utc)
                                 else:
                                     self.surface_vessel['heading'] = None
                                     self.surface_vessel['heading_time'] = None
@@ -539,9 +634,14 @@ class Modem:
                 response = requests.get(api_url, timeout=0.5)
                 output = response.json()
                 self.pressure = output
+                now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f %Z")
                 self.z = pressure_2_depth(self.pressure, settings['atm_pressure_hpa'])
                 log_full.debug('Pressure: ' + str(self.pressure) + ' hPa')
                 log_full.debug('Depth: ' + str(self.z) + ' m')
+                pline = now + ' -- ' + str(self.pressure) + ' hPa'
+                dline = now + ' -- ' + str(self.z) + ' m'
+                write_to_file(self.recvd_data_path + '/rov_pressure.txt', pline)
+                write_to_file(self.recvd_data_path + '/rov_depth.txt', dline)
                 self.has_pressure = True
             except Exception as e:
                 log_full.error('Unable to parse pressure from API.')
@@ -576,7 +676,7 @@ class Modem:
         sleep_to_full_second()
         if self.has_gps or self.has_pressure:
             while self.ser.is_open:
-                now = datetime.now()
+                now = datetime.now(timezone.utc)
                 if now.second in self.broadcast_times:
                     if self.has_gps and self.lat and self.lon:
                         log_full.info("Passive beacon position is %.5f, %.5f at %.2f m" % (self.lat, self.lon, self.z))
@@ -589,6 +689,70 @@ class Modem:
                         msg = encode_ll(self.lat, self.lon, self.z)
                         self.broadcast(msg)
                 time.sleep(1)
+
+    def passive_datacast(self, findex):
+        """Periodically broadcast/unicast most recent data."""
+        sleep_to_full_second()
+        with open(self.data_files[findex], "r", encoding="utf-8") as f:
+            while self.ser.is_open:
+                # read the last line from the file
+                for line in f:
+                    pass
+                msg = line
+                # deliver the data
+                if msg:
+                    if self.data_method == 'broadcast':
+                        log_full.debug("Sending broadcast data message.")
+                        self.broadcast(msg)
+                    elif self.data_method == 'unicast':
+                        log_full.debug("Sending unicast data message.")
+                        self.unicast(msg, self.data_target)
+                time.sleep(self.data_rates[findex])
+
+    def monitor_for_input(self):
+        """ Monitor a socket for commands received external to this program.
+        """
+
+        log_full.debug('Starting monitor_for_input thread.')
+
+        PORT = self.input_port
+        HOST = '127.0.0.1'
+        MAX_LENGTH = 4096
+
+        log_full.debug('Opening input socket.')
+        serversocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        serversocket.bind((HOST, PORT))
+        log_full.debug('Bound to socket %s' % (serversocket))
+        serversocket.listen(5)
+
+        while True:
+            # accept connections from outside
+            (clientsocket, address) = serversocket.accept()
+            log_full.debug('Client socket connected.')
+
+            msg = clientsocket.recv(MAX_LENGTH)
+            if msg == '':  # client terminated connection
+                clientsocket.close()
+                log_full.debug('Client socket closed.')
+            strmsg = msg.decode()
+            log_full.info(strmsg)
+            log_short.info(strmsg)
+            self.manage_input(strmsg)
+
+        log_full.debug('Ending monitor_for_input thread.')
+
+    def manage_input(self, msg):
+        """ Unicast received commands to the desired target."""
+
+        log_full.debug('Managing input.')
+        log_full.debug(msg)
+
+        split_msg = msg.split(' ', 1)
+        target = int(split_msg[0])
+        cmd = split_msg[1]
+        log_full.debug('Sending unicast command.')
+        self.unicast(cmd, target)
+        log_full.debug('Done managing input.')
 
     def gps_forward(self):
         """Periodically forward current position to PixHawk
@@ -648,7 +812,7 @@ class Modem:
         period = float(self.args[0]) - settings['rate']
         target = len(self.args) > 1 and int(self.args[1]) or None
         while self.ser.is_open:
-            current_time = datetime.now().strftime("%H:%M:%S")
+            current_time = datetime.now(timezone.utc).strftime("%H:%M:%S")
             if target:
                 self.unicast(current_time, target)
             else:
@@ -671,8 +835,10 @@ class Modem:
         gps_thread = Thread(target=self.monitor_gps)
         vessel_gps_thread = Thread(target=self.monitor_vessel_gps)
         broadcast_thread = Thread(target=self.passive_broadcast)
+        command_thread = Thread(target=self.passive_listen)
         pressure_thread = Thread(target=self.monitor_pressure)
         output_thread = Thread(target=self.gps_forward)
+        input_thread = Thread(target=self.monitor_for_input)
 
         # Threads for debugging
         report_thread = Thread(target=self.debug_report)
@@ -683,10 +849,21 @@ class Modem:
             listen_thread.start()
             pressure_thread.start()
             output_thread.start()
+            input_thread.start()
             if self.platform == 'rov':
                 vessel_gps_thread.start()
 
         elif mode == "passive":
+            if self.has_data:
+                datathreads = list()
+                for i in range(0, len(self.data_files)):
+                    datacast_thread = Thread(target=self.passive_datacast, args=(i,))
+                    datathreads.append(datacast_thread)
+                    datacast_thread.start()
+                    # stagger the datacasting threads
+                    time.sleep(2)
+            input_thread.start()
+            command_thread.start()
             # broadcast_thread.start()
             # gps_thread.start()
             # pressure_thread.start()
@@ -714,17 +891,17 @@ def parse_message(msg_str):
         log_full.debug(':::' + msg_str + ':::')
 
     # Get message prefix and initialize output
-    prefix = msg_str[1]
+    prefix = msg_str[0:2]
     msg = {}
 
-    # time message received
-    msg['time'] = datetime.now()
+    # time message received (timezone aware)
+    msg['time'] = datetime.now(timezone.utc)
 
     try:
 
         # Status: #AxxxVyyyyy in response to "$?" (query status)
         #      or #Axxx       in response to "$Axxx" (set address)
-        if prefix == "A":
+        if prefix == "#A":
             msg['type'] = "status"
             msg['src'] = int(msg_str[2:5])  # xxx
             if len(msg_str) >= 11:
@@ -732,9 +909,9 @@ def parse_message(msg_str):
             else:
                 msg['voltage'] = None
 
-        # Broadcast: #Bxxxnnddd..Qzz.. (broadcast recieved)
+        # Broadcast: #Bxxxnnddd..Qzz.. (broadcast received)
         #            #Bnn          (self broadcast acknowledge)
-        elif prefix == "B":
+        elif prefix == "#B":
             if len(msg_str) > 4:
                 msg['type'] = "broadcast"
                 msg['src'] = int(msg_str[2:5])  # xxx
@@ -747,7 +924,7 @@ def parse_message(msg_str):
                 msg['len'] = int(msg_str[2:])
 
         # Unicast: #Unnddd...Qzz
-        elif prefix == "U":
+        elif prefix == "#U":
             msg['type'] = "unicast"
             msg['src'] = None
             msg['len'] = int(msg_str[2:4])  # nn
@@ -756,7 +933,7 @@ def parse_message(msg_str):
             # msg['qual'] = msg_str[end_data+1:end_data+3]  # zz
 
         # Range: #RxxxTyyyyy
-        elif prefix == "R":
+        elif prefix == "#R":
             msg['type'] = "range"
             msg['src'] = int(msg_str[2:5])
             msg['range'] = float(settings['sound_speed']) * 3.125e-5 * float(msg_str[6:11])
@@ -883,19 +1060,19 @@ def set_system_time(dateandtime):
     """Set the system time to the input datestamp from the GPS."""
 
     log_full.info('Setting the system time ...')
-    log_full.info('Current system time : ' + str(datetime.now()))
+    log_full.info('Current system time : ' + str(datetime.now(timezone.utc)))
     log_full.info('Current GPS time    : ' + str(dateandtime))
 
     # set the system time
     system('sudo date --set="%s"' % str(dateandtime))
 
-    log_full.info('Current system time : ' + str(datetime.now()))
+    log_full.info('Current system time : ' + str(datetime.now(timezone.utc)))
 
 
 def sleep_to_full_second():
     """Sleeps until the time is close to being on a full second."""
 
-    ms = float(datetime.now().microsecond)
+    ms = float(datetime.now(timezone.utc).microsecond)
     time.sleep((1000000.0 - ms)/1000000.0)
 
 
@@ -942,3 +1119,25 @@ def gps_at_offset(lat, lon, head, x, y):
     lon2 = math.degrees(lon2)
 
     return lat2, lon2
+
+
+def send_socket(port, msg):
+    """ Send a message to a port (socket)."""
+
+    try:
+        HOST = '127.0.0.1'
+        s = socket.socket()
+        s.connect((HOST, int(port)))
+        s.send(msg.encode())
+        s.close()
+    except Exception as e:
+        print(e)
+        print(HOST)
+        print(port)
+
+
+def write_to_file(file, msg):
+    """ Writes (appends) message to a file."""
+
+    with open(file, 'a') as f:
+        f.write(msg.rstrip() + '\n')
