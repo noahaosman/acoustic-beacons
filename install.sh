@@ -20,3 +20,4 @@ sudo crontab pi.cron
 
 # create a folder to hold any incoming data (if it doesn't exist)
 mkdir /home/pi/nav/data
+chown -R pi:pi /home/pi/nav/data

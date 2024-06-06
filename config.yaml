@@ -34,12 +34,12 @@ modems:
     z: -1.0
     broadcast_times: []
     static: False
-    data_rates: [60, 60]
-    data_files: ['/home/pi/data/revs.txt', '/home/pi/data/voltage.txt',]
+    data_rates: []
+    data_files: []
     data_target: 106
     recvd_data_path: /home/pi/nav/data
   203:
-    mode: off
+    mode: passive
     vessel: False
     x: 0.0
     y: 10.0
@@ -47,32 +47,38 @@ modems:
     lon: -123.27878
     z: -1.0
     broadcast_times: []
-    serial_gps: /dev/ttyAMA0
     static: False
+    data_rates: []
+    data_files: []
+    data_target: 106
     recvd_data_path: /home/pi/nav/data
   204:
-    mode: off
-    vessel: True
-    x: 5.0
-    y: -2.0
-    lat: 44.56275
+    mode: passive
+    vessel: False
+    x: 0.0
+    y: 10.0
+    lat: 44.56283
     lon: -123.27878
     z: -1.0
     broadcast_times: []
-    serial_gps: /dev/ttyAMA0
     static: False
+    data_rates: []
+    data_files: []
+    data_target: 106
     recvd_data_path: /home/pi/nav/data
   205:
-    mode: off
-    vessel: True
-    x: -5.0
-    y: -2.0
-    lat: 44.56275
-    lon: -123.27866
+    mode: passive
+    vessel: False
+    x: 0.0
+    y: 10.0
+    lat: 44.56283
+    lon: -123.27878
     z: -1.0
     broadcast_times: []
-    serial_gps: /dev/ttyAMA0
     static: False
+    data_rates: []
+    data_files: []
+    data_target: 106
     recvd_data_path: /home/pi/nav/data
   106:
     mode: active
@@ -83,16 +89,18 @@ modems:
     rov: True
     recvd_data_path: /home/pi/nav/data
   208:
-    mode: off
+    mode: passive
     vessel: False
-    x: -5.0
-    y: -2.0
-    lat: 44.56275
-    lon: -123.27866
+    x: 0.0
+    y: 10.0
+    lat: 44.56283
+    lon: -123.27878
     z: -1.0
     broadcast_times: []
-    serial_gps: /dev/ttyAMA0
     static: False
+    data_rates: []
+    data_files: []
+    data_target: 106
     recvd_data_path: /home/pi/nav/data
   209:
     mode: passive
@@ -104,7 +112,7 @@ modems:
     z: -1.0
     broadcast_times: []
     static: False
-    data_rates: [60, 60]
-    data_files: ['/home/pi/data/revs.txt', '/home/pi/data/voltage.txt',]
+    data_rates: []
+    data_files: []
     data_target: 106
     recvd_data_path: /home/pi/nav/data
