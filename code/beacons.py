@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import sys
+import unhandled_exit
+unhandled_exit.activate() # exit main thread if any threads crash.
 from classes.modem import Modem
 
 # Get command line arguments
