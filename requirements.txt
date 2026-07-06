@@ -1,4 +1,4 @@
-unhandled-exit
+unhandled_exit
 pyserial
 pyyaml
 numpy
