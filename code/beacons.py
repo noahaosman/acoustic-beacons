@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+/home/pi/nav/venv/bin/python
 
 import sys
 import unhandled_exit

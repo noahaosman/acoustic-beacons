@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-sudo pip install -r requirements.txt
+# Set repo path
+REPO="/home/$SUDO_USER/nav"
+
+# Install Python tooling for venvs
+sudo apt-get install -y python3 python3-venv python3-pip
+
+# Create virtual environment
+python3 -m venv "$REPO/venv"
+
+# Install requirements
+"$REPO/venv/bin/pip" install -r "$REPO/requirements.txt"
 
 # systemd service
 sudo cp system/beacons.service /etc/systemd/system/beacons.service

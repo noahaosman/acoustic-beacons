@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+/home/pi/nav/venv/bin/python
 
 import numpy as np
 from scipy.optimize import minimize

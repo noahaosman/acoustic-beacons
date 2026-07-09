@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+/home/pi/nav/venv/bin/python
 from threading import Thread, Lock
 import itertools
 import serial

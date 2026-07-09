@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+/home/pi/nav/venv/bin/python
 
 # Listen for incoming GPS data on port 27000
 
