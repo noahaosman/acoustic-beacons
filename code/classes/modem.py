@@ -1,4 +1,6 @@
-#!/usr/bin/env python3
+#!/bin/sh
+''''exec /home/pi/meltstake/venv/bin/python "$0" "$@" || exec /usr/bin/env python3 "$0" "$@"
+'''
 from threading import Thread, Lock
 import itertools
 import serial

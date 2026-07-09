@@ -1,4 +1,6 @@
-#!/usr/bin/env python3
+#!/bin/sh
+''''exec /home/pi/meltstake/venv/bin/python "$0" "$@" || exec /usr/bin/env python3 "$0" "$@"
+'''
 
 import numpy as np
 from scipy.optimize import minimize
