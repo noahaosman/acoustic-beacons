@@ -1,6 +1,4 @@
-#!/bin/sh
-''''exec /home/pi/meltstake/venv/bin/python "$0" "$@" || exec /usr/bin/env python3 "$0" "$@"
-'''
+#!/usr/bin/env python3
 
 import sys
 import unhandled_exit
