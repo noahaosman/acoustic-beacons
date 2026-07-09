@@ -1,4 +1,4 @@
-/home/pi/nav/venv/bin/python
+#!/home/pi/nav/venv/bin/python
 
 # Periodically forward current position to PixHawk
 #
