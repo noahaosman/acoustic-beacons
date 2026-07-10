@@ -17,6 +17,7 @@ python3 -m venv "$REPO/venv"
 sudo cp system/beacons.service /etc/systemd/system/beacons.service
 
 # rsyslog configuration
+sudo apt-get install -y rsyslog
 sudo cp system/beacons.conf /etc/rsyslog.d/beacons.conf
 
 # udev rules for renaming serial ports
